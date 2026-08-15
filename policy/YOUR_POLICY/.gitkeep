@@ -1,0 +1,14 @@
+# 自有 Policy 占位
+#
+# 本目录用于放置参赛者自有 policy 实现。
+# 适配方式请参照：
+#   https://github.com/XPolicyLab/XPolicyLab/blob/main/policy/ACT/README.md
+#
+# 建议结构（待实现）：
+#   policy/YOUR_POLICY/
+#   ├── README.md          # policy 说明
+#   ├── model.py           # 网络定义
+#   ├── dataset.py         # 数据加载（对接 data/hdf5/）
+#   ├── train.py           # 训练入口
+#   ├── infer.py           # 推理入口（被 deploy_policy_server.py 调用）
+#   └── checkpoints/       # 训练导出的 ckpt（已被 .gitignore 忽略）

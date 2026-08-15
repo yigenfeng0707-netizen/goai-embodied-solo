@@ -1,0 +1,66 @@
+# ===== Python =====
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.eggs/
+build/
+dist/
+
+# ===== 虚拟环境 / conda =====
+.venv/
+venv/
+env/
+.env
+
+# ===== 模型权重 =====
+*.ckpt
+*.pth
+*.pt
+*.h5
+*.hdf5
+checkpoints/
+weights/
+
+# ===== 数据集 / 资产 =====
+data/
+datasets/
+assets/
+Assets/
+
+# ===== 第三方子仓库 =====
+RoboDojo/
+XPolicyLab/
+
+# ===== IDE =====
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# ===== 操作系统 =====
+.DS_Store
+Thumbs.db
+
+# ===== 日志 / 实验追踪 =====
+logs/
+*.log
+wandb/
+runs/
+
+# ===== 文档产物 =====
+pdf_pages/
+*.pdf
+
+# ===== 归档 / 调试残留（不进入仓库）=====
+_archive/
+_archive_local/
+_submit_shots/
+deploy.yml.pack_only
+*.zip
+
+# ===== 本地路径配置（防止泄露个人路径）=====
+.trae/
+# ===== DSW debug scratch (not part of submission) =====
+scripts/_*
+scripts/ANCHORED_SUMMARY.md

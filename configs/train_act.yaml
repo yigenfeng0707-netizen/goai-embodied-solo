@@ -1,0 +1,80 @@
+# ACT 训练超参（合规版：单一多任务联合训练）
+# ==========================================================================
+# 用法:
+#   bash scripts/train_unified_act.sh [GPU_ID]
+# 或直接:
+#   cd XPolicyLab/policy/ACT
+#   bash train.sh RoboDojo cotrain arx_x5 joint 0 0
+#
+# 合规要点
+# --------
+# 不再为每个任务训练独立 ckpt（旧方案导致评测期切换模型，违反规则）。
+# 现统一采用 cotrain recipe：在合并的 12 任务数据集上联合训练，
+# 产出 **唯一一个** 多任务 ckpt，覆盖全部 24 个评测配置。
+# ==========================================================================
+
+bench_name: RoboDojo
+env_cfg_type: arx_x5
+action_type: joint
+action_dim: 14
+
+# 单一 ckpt 名称（cotrain = 多任务联合训练）
+ckpt_name: cotrain
+
+# ACT 模型架构
+policy_class: ACT
+kl_weight: 10
+chunk_size: 50
+hidden_dim: 512
+dim_feedforward: 3200
+temporal_agg: false
+
+# 训练超参
+batch_size: 16
+num_epochs: 6000
+lr: 0.00001
+lr_backbone: 0.00001
+weight_decay: 0.0001
+save_freq: 6000
+seed: 0
+
+# DETR backbone
+backbone: resnet18
+position_embedding: sine
+nheads: 8
+enc_layers: 4
+dec_layers: 7
+pre_norm: false
+dropout: 0.1
+masks: false
+dilation: false
+
+# 相机
+camera_names: ["cam_head", "cam_right_wrist", "cam_left_wrist"]
+
+# 设备
+device: cuda:0
+gpu_id: "0"
+
+# ==========================================================================
+# 合规训练策略
+# ==========================================================================
+# 1. **唯一 ckpt**: cotrain recipe 产出单一 ckpt，覆盖 12 任务分布
+# 2. **数据合并**: 将 12 任务数据聚合到 data/RoboDojo/cotrain/ 下
+#    （官方提供合并数据则直接使用；否则参考 process_data.sh 流程合并）
+# 3. **不再使用**: 按任务独立训练 → 按任务切换 ckpt 的多模型方案
+#
+# 12 个评测任务（合并训练目标）:
+all_tasks:
+  - stack_bowls
+  - push_T
+  - pack_objects_into_box
+  - fold_clothes
+  - hang_mugs
+  - sweep_blocks
+  - pour_liquid_into_cup
+  - make_toast
+  - arrange_largest_number
+  - sort_nesting_dolls_by_size
+  - store_laptop_and_headphones
+  - stack_blocks

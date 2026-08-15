@@ -1,0 +1,45 @@
+# GOAI 2026 Generalization 维度 12 个基础任务
+# 每个任务有 _random 随机化配置，共 24 个可运行配置
+# 任务说明见 https://robodojo-benchmark.com/doc/sim-tasks/
+
+dimension: generalization
+tasks:
+  - name: stack_bowls
+    doc: https://robodojo-benchmark.com/doc/sim-tasks/stack-bowls/
+    random: stack_bowls_random
+  - name: push_T
+    doc: https://robodojo-benchmark.com/doc/sim-tasks/push-t/
+    random: push_T_random
+  - name: pack_objects_into_box
+    doc: https://robodojo-benchmark.com/doc/sim-tasks/pack-objects-into-box/
+    random: pack_objects_into_box_random
+  - name: fold_clothes
+    doc: https://robodojo-benchmark.com/doc/sim-tasks/fold-clothes/
+    random: fold_clothes_random
+  - name: hang_mugs
+    doc: https://robodojo-benchmark.com/doc/sim-tasks/hang-mugs/
+    random: hang_mugs_random
+  - name: sweep_blocks
+    doc: https://robodojo-benchmark.com/doc/sim-tasks/sweep-blocks/
+    random: sweep_blocks_random
+  - name: pour_liquid_into_cup
+    doc: https://robodojo-benchmark.com/doc/sim-tasks/pour-liquid-into-cup/
+    random: pour_liquid_into_cup_random
+  - name: make_toast
+    doc: https://robodojo-benchmark.com/doc/sim-tasks/make-toast/
+    random: make_toast_random
+  - name: arrange_largest_number
+    doc: https://robodojo-benchmark.com/doc/sim-tasks/arrange-largest-number/
+    random: arrange_largest_number_random
+  - name: sort_nesting_dolls_by_size
+    doc: https://robodojo-benchmark.com/doc/sim-tasks/sort-nesting-dolls-by-size/
+    random: sort_nesting_dolls_by_size_random
+  - name: store_laptop_and_headphones
+    doc: https://robodojo-benchmark.com/doc/sim-tasks/store-laptop-and-headphones/
+    random: store_laptop_and_headphones_random
+  - name: stack_blocks
+    doc: https://robodojo-benchmark.com/doc/sim-tasks/stack-blocks/
+    random: stack_blocks_random
+
+# 评测：X-Eval 平台，最多3次提交取最高，>10分晋级
+# 真机：8项任务，1月云调试+3天线下

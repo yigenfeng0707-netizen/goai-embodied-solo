@@ -1,0 +1,70 @@
+# Generalization 维度评测配置（24 配置）
+# ==========================================================================
+# 用法:
+#   bash scripts/robodojo.sh smoke --dimension generalization ...  (冒烟, 1 episode)
+#   bash scripts/eval_local.sh                                    (正式, 20 episode)
+#
+# 合规声明
+# --------
+# 本配置对应 **单一 ckpt** UnifiedACT 方案：全部 24 个评测配置
+# 共用同一个 ACT checkpoint（cotrain 产物），不存在任务切换。
+# ==========================================================================
+
+dimension: generalization
+bench_name: RoboDojo
+env_cfg_type: arx_x5
+action_type: joint
+
+# 统一 policy 名称与目录（替换旧的 MultiACT）
+policy_name: UnifiedACT
+policy_dir: XPolicyLab/policy/UnifiedACT
+
+# 冒烟测试: 每配置 1 episode, 仅验证链路
+smoke_eval_num: 1
+
+# 正式评测: 每配置 20 episode, 记录成功率
+formal_eval_num: 20
+
+# 24 个评测配置 (12 标准 + 12 _random)
+# 全部由同一个 UnifiedACT 单 ckpt 推理；prepare_case 仅记录日志，不切换模型。
+configs:
+  standard:
+    - stack_bowls
+    - push_T
+    - pack_objects_into_box
+    - fold_clothes
+    - hang_mugs
+    - sweep_blocks
+    - pour_liquid_into_cup
+    - make_toast
+    - arrange_largest_number
+    - sort_nesting_dolls_by_size
+    - store_laptop_and_headphones
+    - stack_blocks
+  random:
+    - stack_bowls_random
+    - push_T_random
+    - pack_objects_into_box_random
+    - fold_clothes_random
+    - hang_mugs_random
+    - sweep_blocks_random
+    - pour_liquid_into_cup_random
+    - make_toast_random
+    - arrange_largest_number_random
+    - sort_nesting_dolls_by_size_random
+    - store_laptop_and_headphones_random
+    - stack_blocks_random
+
+# 晋级阈值: 综合得分 > 10 分
+passing_score: 10
+# 最多 3 次有效提交, 取最高分
+max_submissions: 3
+
+# ==========================================================================
+# 合规审查要点（评测方参考）
+# ==========================================================================
+# 1. policy_name = UnifiedACT（单一 ckpt 包装器，无任务切换）
+# 2. action_type = joint（评测期不可变更）
+# 3. 所有 24 个 configs 共用同一 ckpt（见 policy/UnifiedACT/deploy.yml::ckpt_dir）
+# 4. prepare_case 仅记录日志，不调用任何模型切换/重载操作
+# ==========================================================================

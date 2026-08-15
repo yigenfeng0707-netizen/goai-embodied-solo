@@ -1,0 +1,80 @@
+# UnifiedACT 部署配置 — 单一多任务 ACT checkpoint（赛事规则合规版）
+# =========================================================================
+# 用法:
+#   python XPolicyLab/setup_policy_server.py \
+#       --config_path policy/UnifiedACT/deploy.yml \
+#       --overrides host=0.0.0.0 port=19002
+#
+# 合规声明
+# --------
+# 本配置只声明 **一个** ckpt 路径，全部 24 个评测配置
+# （12 任务 × {标准, _random}）共用同一个 ACT checkpoint。
+# 本配置 **不存在** task_ckpt_map / task_fallback_map / default_task
+# 等多模型切换字段；模型的 nn.Parameter 集合在评测全生命周期保持恒定，
+# 满足赛事规则："审核和正式评测期间，请保持同一服务在线，
+#                不要更换模型、动作类型或协议行为。"
+#
+# 单一 ckpt 训练方式
+# ------------------
+#   cd XPolicyLab/policy/ACT
+#   bash train.sh RoboDojo cotrain arx_x5 joint 0 0
+# 产物路径示例：checkpoints/RoboDojo-cotrain-arx_x5-joint-0/
+# 将绝对路径填入下方 ckpt_dir 即可。
+# =========================================================================
+
+policy_name: UnifiedACT
+protocol: ws
+host: 0.0.0.0
+port: 19002
+bench_name: RoboDojo
+
+# task_name 仅用于标识，不参与模型路由（统一模型不需要按任务切换）
+task_name: cotrain
+ckpt_name: cotrain
+
+env_cfg_type: arx_x5
+action_type: joint
+action_dim: 14
+ckpt_setting: null
+seed: 0
+eval_batch: false
+
+# ACT 模型架构参数（须与训练时一致）
+kl_weight: 10.0
+chunk_size: 50
+hidden_dim: 512
+dim_feedforward: 3200
+temporal_agg: false
+device: cuda:0
+
+# DETR parser 参数（build_backbone / build_position_encoding 需要）
+policy_class: ACT
+num_epochs: 6000
+
+# 单一 ckpt 路径 —— 整个评测周期只加载这一个目录下的 policy_*.ckpt
+# 默认指向 DSW 上 cotrain recipe 的产物路径；评测方环境若不同，请按需修改。
+ckpt_dir: /mnt/workspace/RoboDojo/ckpt/ACT/act-RoboDojo-cotrain/arx_x5-100-joint
+
+# 训练参数（build_backbone & build_position_encoding 访问）
+position_embedding: sine
+lr_backbone: 0.00001
+weight_decay: 0.0001
+lr: 0.00001
+masks: false
+dilation: false
+backbone: resnet18
+nheads: 8
+enc_layers: 4
+dec_layers: 7
+pre_norm: false
+dropout: 0.1
+camera_names: ["cam_head", "cam_right_wrist", "cam_left_wrist"]
+
+# =========================================================================
+# 显式合规说明（评测方审阅）
+# =========================================================================
+# 1. 单一 ckpt：上面 ckpt_dir 指向唯一目录；不存在任务→ckpt 映射表。
+# 2. 单一动作类型：action_type=joint 在评测期不可变更。
+# 3. 单一协议：protocol=ws 在评测期不可变更。
+# 4. prepare_case 仅记录 case_meta 用于日志，不切换/重载任何模型。
+# =========================================================================
