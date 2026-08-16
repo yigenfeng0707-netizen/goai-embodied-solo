@@ -239,6 +239,11 @@ bash scripts/eval_local.sh
 > 加载方式：将 ckpt 放入某目录后，在 `policy/UnifiedACT/deploy.yml` 设置
 > `ckpt_dir: <该目录>`、`ckpt_name: epoch_3100_seed_0`（即加载 `policy_epoch_3100_seed_0.ckpt`）。
 > 此 ckpt 为 **唯一一个**，24 配置共用，评测期不切换。
+>
+> 同一仓库内已一并提供 **`dataset_stats.pkl`**（与 ckpt 同目录，用于保证推理与训练阶段数据统计参数一致）：
+> - 单文件直链：https://modelscope.cn/models/gsym236998/goai-embodied-solo-ckpt/resolve/master/dataset_stats.pkl
+> - 命令行：`modelscope download gsym236998/goai-embodied-solo-ckpt dataset_stats.pkl`
+> - 评测时请将 `dataset_stats.pkl` 与 `policy_epoch_3100_seed_0.ckpt` 放在同一目录下。
 
 ---
 
