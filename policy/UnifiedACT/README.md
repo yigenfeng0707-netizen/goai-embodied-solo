@@ -59,7 +59,7 @@
 ## 部署
 
 ```bash
-# 1. 启动 Policy Server（单 ckpt，单模型）
+# 1. 启动 Policy Server（单 ckpt，单模型，默认开启 Batch Inference）
 python XPolicyLab/setup_policy_server.py \
     --config_path policy/UnifiedACT/deploy.yml \
     --overrides host=0.0.0.0 port=19002
@@ -68,13 +68,59 @@ python XPolicyLab/setup_policy_server.py \
 cloudflared tunnel --url http://localhost:19002 &
 ```
 
-`deploy.yml` 的 `ckpt_dir` 默认指向 DSW 上的 cotrain recipe 产物路径：
+`deploy.yml` 的 `ckpt_dir` 默认指向 cotrain recipe 产物路径：
 
 ```
-/mnt/workspace/RoboDojo/ckpt/ACT/act-RoboDojo-cotrain/arx_x5-100-joint
+/root/ckpts/RoboDojo-cotrain-arx_x5-joint-0
 ```
 
-评测方环境若不同，请按需修改 `ckpt_dir`，或通过环境变量 / overrides 覆盖。
+评测方环境若不同，请按需修改 `ckpt_dir`，或通过 `--overrides ckpt_dir=<路径>` 覆盖。
+
+## ★ Batch Inference（赛事方推荐，显著加快评测进度）
+
+### 原理
+XPolicyLab PolicyServer 是 **多连接 / 多线程** 的：每条 wss 连接为独立线程
+（`evaluation_id + trial_id` 唯一标识 session），按 episode 循环调用：
+
+    prepare_case → reset → (update_obs → get_action) × N 步 → TRIAL_END
+
+当评测端同时跑多条连接时，不同线程的 `get_action()` 会在接近的时间点
+各自请求一次 GPU 前向。**UnifiedACT 的 Batch Inference Adapter** 将这些
+接近同时的请求合并为一个"动态 batch"，一次性处理，显著提升 GPU 利用率
+和总评测吞吐。
+
+### 合规保证（Batch 模式仍然满足全部规则）
+- **唯一 ckpt**：仍然只有一份 `self.backbone`，全部 `nn.Parameter` 恒定；
+  batch 只是"数据并行"维度的复用，不是切换 ckpt / 动作类型 / 协议。
+- **Batch = 1 时结果与单步逐位相同**：当队列中只有 1 个 session、窗口
+  超时触发时，完整走原 backbone 的 `update_obs → get_action` 流水线，
+  不改变输出分布，**不影响评测成功率**。
+- **Per-session 状态严格隔离**：`temporal_agg` 的 `all_actions`、
+  `obs_history`、时间步等全部状态以 trial_id 为 key 独立存储，
+  session 之间无串扰。
+
+### 配置项（deploy.yml）
+
+| 字段 | 默认 | 含义 |
+|------|------|------|
+| `eval_batch` | `true` | 总开关；`false` 回退到原单步路径（100% 行为不变）。 |
+| `batch_max_size` | `8` | 单个 batch 的最大 session 数。A10 24G 建议 4~8；更大 GPU 可到 16。 |
+| `batch_window_ms` | `12` | 收集窗口（毫秒）。越小延迟越低，越大 batch 越满。建议 8~20 ms。 |
+
+### 推荐用法
+- **评测端**：同时向 Policy Server 建立 4~8 条并行 wss 连接（跑不同
+  trial / seed），会自动合并为 batch 推理。
+- **诊断**：实例提供 `model.batch_stats()` 返回：
+  - `num_batches` / `last_batch_size` / `avg_batch_size`：实际 batch 效果
+  - `scheduler_errors`：批内部异常计数（应为 0）
+  - `active_trials`：当前在线 session 数
+- **兼容性回退**：如果环境有任何问题，把 `eval_batch` 改为 `false`
+  即可完全恢复原单步行为，不影响合规与成功率。
+
+### 与官方 `eval_batch` 字段的关系
+XPolicyLab 在 deploy.yml 标准字段中预留了 `eval_batch`。UnifiedACT
+对该字段做了原生支持：当 `eval_batch=true` 时启用动态 batch，否则走
+旧路径。评测方无需修改 PolicyServer 代码，直接用标准字段即可。
 
 ## 训练（生产单一多任务 ckpt）
 

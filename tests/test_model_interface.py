@@ -187,6 +187,257 @@ def test_action_type_immutable_after_construction():
         assert m.action_type == "joint"
 
 
+# ---------------------------------------------------------------------------
+# 测试 6：Batch Inference — 合规性 & 功能正确性（mock，无需真实 ckpt）
+# ---------------------------------------------------------------------------
+
+def _make_unifiedact_batch(mock_backbone=None, eval_batch=True,
+                           batch_max_size=4, batch_window_ms=10.0):
+    """构造带 batch 支持的 UnifiedACT 实例，绕过真实 ACTModel 加载。
+
+    注入 mock backbone：单步行为完全可控。
+    """
+    with patch.dict(sys.modules, {
+        "torch": MagicMock(),
+        "numpy": MagicMock(),
+        "XPolicyLab.policy.ACT.model": MagicMock(),
+    }):
+        if "UnifiedACT.model" in sys.modules:
+            del sys.modules["UnifiedACT.model"]
+        from UnifiedACT.model import Model, _BatchACTWrapper, _BatchScheduler
+        m = Model.__new__(Model)
+        # 合规字段
+        m.ckpt_dir = "/fake/cotrain"
+        m.ckpt_name = "cotrain"
+        m.action_type = "joint"
+        m.last_case_meta = None
+        m._case_counter = 0
+        # 注入共享的 mock backbone（唯一实例引用）
+        if mock_backbone is None:
+            bb = MagicMock()
+            bb.chunk_size = 50
+            bb.temporal_agg = True
+            bb.action_dim = 14
+            bb.device = "cpu"
+            bb.camera_names = ["cam_head", "cam_right_wrist", "cam_left_wrist"]
+            bb.stats = None
+            def _seq_action():
+                # 返回带 deterministic 计数的动作，用于验证 session 间状态隔离
+                _seq_action.calls = getattr(_seq_action, "calls", 0) + 1
+                import numpy as np  # local; outer mock may not have this
+                arr = np.full((50, 14), float(_seq_action.calls), dtype=np.float32)
+                return {"action": arr}
+            bb.get_action = MagicMock(side_effect=lambda: _seq_action())
+            bb.update_obs = MagicMock()
+            bb.reset = MagicMock()
+            mock_backbone = bb
+        m.backbone = mock_backbone
+        # Batch 支持
+        m.eval_batch = bool(eval_batch)
+        m._batch_max_size = int(batch_max_size)
+        m._batch_window_ms = float(batch_window_ms)
+        if m.eval_batch:
+            # 构造 cfg dict（与 _BatchACTWrapper.__init__ 参数匹配）
+            cfg = {"ckpt_dir": m.ckpt_dir, "ckpt_name": m.ckpt_name,
+                   "chunk_size": 50, "temporal_agg": True, "action_dim": 14,
+                   "device": "cpu",
+                   "camera_names": ["cam_head", "cam_right_wrist", "cam_left_wrist"]}
+            m._batch = _BatchACTWrapper(m.backbone, cfg)
+            m._scheduler = _BatchScheduler(
+                batch_forward_fn=m._batch_forward_sequential,
+                max_batch_size=m._batch_max_size,
+                batch_window_ms=m._batch_window_ms,
+                name="UT-UnifiedACT",
+            )
+        else:
+            m._batch = None
+            m._scheduler = None
+        return m
+
+
+def test_batch_mode_still_single_backbone_reference():
+    """batch 模式下仍然只有一个 backbone 引用，合规。"""
+    m = _make_unifiedact_batch(eval_batch=True)
+    assert m._batch is not None
+    assert m._batch.backbone is m.backbone
+    # compliance_self_check 须通过
+    r = m.compliance_self_check()
+    assert r["rule_compliant"] is True, r
+    assert r["eval_batch_enabled"] is True
+    assert r["batch_uses_same_backbone"] is True
+
+
+def test_batch_mode_no_forbidden_fields():
+    """batch 模式下实例仍然没有多模型切换字段。"""
+    m = _make_unifiedact_batch(eval_batch=True)
+    forbidden = ("task_models", "fallback_map", "active_model",
+                 "active_task", "task_ckpt_map", "default_task")
+    for f in forbidden:
+        assert not hasattr(m, f), f"batch 模式不应包含多模型字段 '{f}'"
+
+
+def test_batch_scheduler_threading_smoke():
+    """_BatchScheduler 的 batching 逻辑：多线程并发 submit → 合并为 1 次批调用。"""
+    import threading, time
+    call_log = []  # 每次 batch 调用记录 (batch_size, return_values)
+    def _fn(states):
+        call_log.append(len(states))
+        # 返回每个 session 的动作（与 index 绑定的递增值）
+        return [{"action_in_batch": i} for i in range(len(states))]
+
+    from UnifiedACT.model import _BatchScheduler, _PerTrialState
+    sched = _BatchScheduler(_fn, max_batch_size=8, batch_window_ms=40.0,
+                            name="UT-Sched")
+    # 启动 N 个线程同时 submit（用 barrier 保证尽可能接近同时）
+    N = 6
+    barrier = threading.Barrier(N)
+    results = [None] * N
+    errors = []
+
+    def worker(idx):
+        try:
+            barrier.wait(timeout=2)
+            st = _PerTrialState(50, True)
+            st.last_obs_raw = {"idx": idx}
+            r = sched.submit(st)
+            results[idx] = r
+        except Exception as e:
+            errors.append((idx, repr(e)))
+
+    threads = [threading.Thread(target=worker, args=(i,)) for i in range(N)]
+    for t in threads: t.start()
+    for t in threads: t.join(timeout=5)
+
+    assert not errors, f"errors = {errors}"
+    # 由于窗口 40ms + barrier ≈ 同时唤醒，全部 N 应合并进 1~2 个 batch
+    assert sum(call_log) == N, f"total sessions processed: {call_log}, expected {N}"
+    # 结果按 index 对应
+    assert all(r is not None for r in results), "有线程未获结果"
+    assert sorted(r["action_in_batch"] for r in results) == list(range(N)), \
+        f"结果错位: {results}"
+    sched.shutdown()
+
+
+def test_batch_prepare_case_binds_trial_thread_locally():
+    """prepare_case 按 thread-local 绑定 trial_id；不同线程各自隔离。"""
+    import threading
+    m = _make_unifiedact_batch(eval_batch=True)
+    seen_ids = {}
+    lock = threading.Lock()
+
+    def run_thread(trial):
+        m.prepare_case({"action_case_id": "task_a",
+                        "evaluation_id": "E1", "trial_id": trial})
+        tid = getattr(m._batch._tls, "trial_id", None)
+        with lock:
+            seen_ids[trial] = tid
+
+    ts = [threading.Thread(target=run_thread, args=(f"T{i}",)) for i in range(4)]
+    for t in ts: t.start(); t.join(timeout=3)
+    # 每个 trial 绑定的 id 应唯一且包含其 trial_id
+    vals = list(seen_ids.values())
+    assert len(set(vals)) == 4, f"绑定应唯一: {vals}"
+    for t, v in seen_ids.items():
+        assert t in v, f"trial_id={t} 未出现在绑定 key {v}"
+    # active_trials 应 >= 4
+    assert m._batch.num_active_trials() >= 4
+
+
+def test_batch_vs_legacy_identical_single_session():
+    """batch 模式（单 session → batch_size=1）与 legacy 模式在相同输入
+    下通过完全相同的 backbone 调用路径，得到同一返回值，保证不会改变成功率。
+    """
+    import numpy as np  # 必须在 patch sys.modules 之前真实导入
+    # 共享同一个 deterministic backbone 实例：backbone.get_action 有可预测输出
+    with patch.dict(sys.modules, {
+        "torch": MagicMock(),
+        "XPolicyLab.policy.ACT.model": MagicMock(),
+    }):
+        if "UnifiedACT.model" in sys.modules:
+            del sys.modules["UnifiedACT.model"]
+        from UnifiedACT.model import Model, _BatchACTWrapper, _BatchScheduler
+
+        call_counter = {"n": 0}
+        def _get_action():
+            call_counter["n"] += 1
+            return {"action": np.full((50, 14), call_counter["n"], dtype=np.float32)}
+
+        # build deterministic shared backbone (NOT MagicMock so our call_counter side effect works)
+        class _FakeBB:
+            chunk_size = 50
+            temporal_agg = True
+            action_dim = 14
+            device = "cpu"
+            camera_names = ["cam_head", "cam_right_wrist", "cam_left_wrist"]
+            stats = None
+            def update_obs(self_inner, obs):
+                # record last obs to verify path
+                self_inner._last = obs
+            def get_action(self_inner):
+                return _get_action()
+            def reset(self_inner):
+                pass
+
+        bb_leg = _FakeBB()
+        bb_bat = _FakeBB()
+
+        # ---- legacy path ----
+        leg = Model.__new__(Model)
+        leg.ckpt_dir = "/c"; leg.ckpt_name = "n"; leg.action_type = "joint"
+        leg.last_case_meta = None; leg._case_counter = 0
+        leg.backbone = bb_leg
+        leg.eval_batch = False
+        leg._batch = None; leg._scheduler = None
+
+        # ---- batch path (B=1: window small, submit alone) ----
+        bat = Model.__new__(Model)
+        bat.ckpt_dir = "/c"; bat.ckpt_name = "n"; bat.action_type = "joint"
+        bat.last_case_meta = None; bat._case_counter = 0
+        bat.backbone = bb_bat
+        bat.eval_batch = True
+        bat._batch_max_size = 2
+        bat._batch_window_ms = 1.0  # 极短窗口 → 单个 session 会立即执行
+        cfg = {"ckpt_dir": "/c", "chunk_size": 50, "temporal_agg": True,
+               "action_dim": 14, "device": "cpu",
+               "camera_names": ["cam_head", "cam_right_wrist", "cam_left_wrist"]}
+        bat._batch = _BatchACTWrapper(bat.backbone, cfg)
+        bat._scheduler = _BatchScheduler(
+            batch_forward_fn=bat._batch_forward_sequential,
+            max_batch_size=2,
+            batch_window_ms=1.0,
+            name="UT-Ident",
+        )
+
+        # Run a mini episode on both sides with same obs
+        obs = {"state": {"left_arm_joint_state": [0.1]*6, "left_ee_joint_state": [0.0],
+                         "right_arm_joint_state": [0.2]*6, "right_ee_joint_state": [0.0]}}
+        # Legacy
+        call_counter["n"] = 0
+        leg.reset()
+        leg.update_obs(obs)
+        a_leg = leg.get_action()
+        # Batch (bind first via prepare_case then run)
+        bat.prepare_case({"action_case_id": "t1", "evaluation_id": "e1", "trial_id": "single"})
+        call_counter["n"] = 0
+        bat.reset()
+        bat.update_obs(obs)
+        a_bat = bat.get_action()
+
+        # 两条路径都会执行 backbone.update_obs + get_action 各一次
+        assert hasattr(bb_leg, "_last"), "legacy update_obs 未调到 backbone.update_obs"
+        # batch 模式下 _batch_forward_sequential 内部会调用 bb.update_obs(obs)
+        assert hasattr(bb_bat, "_last"), "batch update_obs 未在 forward 时调到 backbone.update_obs"
+        # 返回值结构与大小完全相同（逐值相同 → batch=1 逐位等价）
+        assert set(a_leg.keys()) == set(a_bat.keys()), (a_leg.keys(), a_bat.keys())
+        np.testing.assert_array_equal(a_leg["action"], a_bat["action"],
+                                      err_msg="batch=1 时动作应与 legacy 逐位相同")
+        # batch stats 正常
+        bs = bat.batch_stats()
+        assert bs["eval_batch"] is True
+        assert bs["num_batches"] >= 1
+        bat._scheduler.shutdown()
+
+
 if __name__ == "__main__":
     # 简单运行器（不依赖 pytest）
     try:

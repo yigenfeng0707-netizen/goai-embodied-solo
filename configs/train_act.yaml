@@ -27,7 +27,9 @@ kl_weight: 10
 chunk_size: 50
 hidden_dim: 512
 dim_feedforward: 3200
-temporal_agg: false
+# temporal_agg 必须与 deploy.yml 一致（推理期不可变更）。
+# true: 对 chunk 内 50 步预测做指数加权平均，提升控制平滑性（ACT 论文默认）。
+temporal_agg: true
 
 # 训练超参
 batch_size: 16

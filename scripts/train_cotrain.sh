@@ -22,4 +22,4 @@ python3 imitate_episodes.py \
   --ckpt_dir /root/ckpts/RoboDojo-cotrain-arx_x5-joint-0 \
   --policy_class ACT --kl_weight 10 --chunk_size 50 --hidden_dim 512 \
   --batch_size $BATCH --dim_feedforward 3200 --num_epochs $NUM_EPOCHS \
-  --lr 1e-5 --save_freq 500 --seed 0
+  --lr 1e-5 --save_freq 500 --seed 0 --temporal_agg

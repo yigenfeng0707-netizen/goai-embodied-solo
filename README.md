@@ -192,12 +192,12 @@ goai-embodied-solo/
 │   ├── setup_env.sh                   # RoboDojo 环境
 │   ├── setup_xpolicylab.sh            # XPolicyLab policy 框架克隆
 │   ├── train_unified_act.sh           # ★ 训练合规单一 ckpt（cotrain）
+│   ├── build_cotrain.py               # cotrain 合并数据集构建
+│   ├── build_parallel.sh              # 12 任务并行构建
+│   ├── train_cotrain.sh / train_cotrain.py  # cotrain 训练封装
 │   ├── deploy_policy_server.py        # Policy Server 部署入口（wss）
 │   ├── smoke_test.sh                  # 24 配置各 1 episode 冒烟
-│   ├── eval_local.sh                  # 24 配置完整评测
-│   ├── check_and_recover.py           # 服务健康检查与恢复（可选）
-│   ├── common_config.py               # 路径 / URL 占位配置
-│   └── RESUME.md                      # 实例重启后的恢复指南
+│   └── eval_local.sh                  # 24 配置完整评测
 │
 ├── docs/                              # 设计文档
 │   ├── architecture.md                # 整体架构（合规版）
@@ -205,7 +205,7 @@ goai-embodied-solo/
 │   └── policy-server-deploy.md        # Policy Server 部署文档
 │
 └── tests/                             # 测试
-    └── test_model_interface.py        # UnifiedACT 合规性测试（10 项）
+    └── test_model_interface.py        # 15 项测试：10 合规 + 5 Batch 功能/线程安全/一致性
 ```
 
 > `RoboDojo/`、`XPolicyLab/` 为第三方子仓库，由脚本克隆，已在 `.gitignore` 中忽略，不进入本仓库。

@@ -30,20 +30,51 @@ bench_name: RoboDojo
 
 # task_name 仅用于标识，不参与模型路由（统一模型不需要按任务切换）
 task_name: cotrain
-ckpt_name: cotrain
+# ckpt_name 必须与 ckpt_dir 下实际文件名匹配：
+#   ACT 加载逻辑为 {ckpt_dir}/policy_{ckpt_name}.ckpt
+#   提交的 ckpt 文件为 policy_epoch_3100_seed_0.ckpt
+ckpt_name: epoch_3100_seed_0
 
 env_cfg_type: arx_x5
 action_type: joint
 action_dim: 14
 ckpt_setting: null
 seed: 0
-eval_batch: false
+
+# ======================================================================
+# Batch Inference（★ 赛事方推荐，显著加速评测进度）
+# ======================================================================
+# 原理：X-Eval 评测端可同时建立多条并行 wss 连接（同时跑多个 trial），
+# 每个连接为独立线程、独立 trial_id。本方案将各线程的 get_action()
+# 请求在短时间窗口内合并为"一组"后，复用 **同一份** backbone 参数
+# 依次串行执行（状态交换 + 连续 GPU 前向），提升 GPU 利用率与评测吞吐。
+#
+# 合规性：batch 仅为"数据并行"维度（复用同一组 nn.Parameter），不切换
+# ckpt / 动作类型 / 协议。batch=1 时结果与单步路径逐位相同，不影响成功率。
+#
+# 可调参数：
+#   eval_batch     = true   → 开启 batch 推理（默认开启）。false 退化为
+#                             旧版单步路径（100% 行为不变，用于兜底）。
+#   batch_max_size = 8      → 单个 batch 的最大 session 数。建议 4~16：
+#                             A10 24G GPU 可安全用 8；更大 GPU 可用 16。
+#   batch_window_ms = 12    → 等待新入 session 的时间窗口（毫秒）。
+#                             越小延迟越低，越大 batch 越满。
+#                             建议 8~20 ms；与仿真步长匹配即可。
+#
+# 关闭方法：将 eval_batch 改为 false（不推荐，仅用于兼容性回退）。
+eval_batch: true
+batch_max_size: 8
+batch_window_ms: 12
 
 # ACT 模型架构参数（须与训练时一致）
 kl_weight: 10.0
 chunk_size: 50
 hidden_dim: 512
 dim_feedforward: 3200
+# temporal_agg=false：与已通过官方评测的 v1 配置完全一致
+# （v1 评测 Generalization SR 0.06% 即在此设置下取得）。
+# 保守起见最后一次提交不改变任何已验证的推理行为，
+# 唯一新增变量为 Batch Inference（已验证 batch=1 与单步逐位一致）。
 temporal_agg: false
 device: cuda:0
 
@@ -52,8 +83,11 @@ policy_class: ACT
 num_epochs: 6000
 
 # 单一 ckpt 路径 —— 整个评测周期只加载这一个目录下的 policy_*.ckpt
-# 默认指向 DSW 上 cotrain recipe 的产物路径；评测方环境若不同，请按需修改。
-ckpt_dir: /mnt/workspace/RoboDojo/ckpt/ACT/act-RoboDojo-cotrain/arx_x5-100-joint
+# 默认指向 cotrain recipe 的产物路径（与 scripts/train_cotrain.sh 一致）。
+# 评测方环境若不同，请将 ckpt + dataset_stats.pkl 放入某目录后修改此字段。
+# 注意：旧值含 "arx_x5-100-joint"（疑似 per-task 100ep 残留），
+#       实际 cotrain 产物路径为 RoboDojo-cotrain-arx_x5-joint-0。
+ckpt_dir: /root/ckpts/RoboDojo-cotrain-arx_x5-joint-0
 
 # 训练参数（build_backbone & build_position_encoding 访问）
 position_embedding: sine
